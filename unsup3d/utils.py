@@ -121,7 +121,8 @@ def save_videos(out_fold, imgs, prefix='', suffix='', sep_folder=True, ext='.mp4
     for i, fs in enumerate(imgs):
         if cycle:
             fs = np.concatenate([fs, fs[::-1]], 0)
-        fourcc = cv2.VideoWriter_fourcc(*'avc1')
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        # fourcc = cv2.VideoWriter_fourcc(*'avc1')
         vid = cv2.VideoWriter(os.path.join(out_fold, prefix+'%05d'%(i+offset)+suffix+ext), fourcc, 5, (fs.shape[2], fs.shape[1]))
         [vid.write(np.uint8(f[...,::-1]*255.)) for f in fs]
         vid.release()

@@ -40,7 +40,7 @@ class Trainer():
                 return 0
             checkpoint_path = checkpoints[-1]
             self.checkpoint_name = os.path.basename(checkpoint_path)
-        print(f"Loading checkpoint '{checkpoint_path}'")
+        print(f"Loading checkpoint from {checkpoint_path}")
         cp = torch.load(checkpoint_path, map_location=self.device)
         self.model.load_model_state(cp)
         if optim:
@@ -59,6 +59,7 @@ class Trainer():
             state_dict = {**state_dict, **optimizer_state}
         state_dict['metrics_trace'] = self.metrics_trace
         state_dict['epoch'] = epoch
+        print(f"Saving checkpoint to {checkpoint_path}")
         torch.save(state_dict, checkpoint_path)
         if self.keep_num_checkpoint > 0:
             utils.clean_checkpoint(self.checkpoint_dir, keep_num=self.keep_num_checkpoint)

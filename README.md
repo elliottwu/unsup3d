@@ -19,14 +19,15 @@ conda install -c conda-forge scikit-image matplotlib opencv moviepy pyyaml tenso
 ```
 
 
-### 2. Install [PyTorch](https://pytorch.org/), eg:
+### 2. Install [PyTorch](https://pytorch.org/):
 ```
 conda install pytorch==1.2.0 torchvision==0.4.0 cudatoolkit=9.2 -c pytorch
 ```
-*Note*: The code is tested with PyTorch 1.2.0 and CUDA 9.2 on CentOS 7.
+*Note*: The code is tested with PyTorch 1.2.0 and CUDA 9.2 on CentOS 7. A GPU version is required for training and testing, since the [neural_renderer](https://github.com/daniilidis-group/neural_renderer) package only has GPU implementation. You are still able to run the demo without GPU.
 
 
-### 3. Install [neural_renderer](https://github.com/daniilidis-group/neural_renderer)
+### 3. Install [neural_renderer](https://github.com/daniilidis-group/neural_renderer):
+This package is required for training and testing, and optional for the demo. It requires a GPU device and GPU-enabled PyTorch.
 ```
 pip install neural_renderer_pytorch
 ```
@@ -37,6 +38,13 @@ conda install gxx_linux-64=7.3
 git clone https://github.com/daniilidis-group/neural_renderer.git
 cd neural_renderer
 python setup.py install
+```
+
+
+### 4. (For demo only) Install [facenet-pytorch](https://github.com/timesler/facenet-pytorch):
+This package is optional for the demo. It allows automatic human face detection.
+```
+pip install facenet-pytorch
 ```
 
 
@@ -55,11 +63,23 @@ cd pretrained && sh download_pretrained_celeba.sh
 ```
 
 
+## Demo
+```
+python -m demo.demo --input demo/images/human_face --result demo/results/human_face --checkpoint pretrained/pretrained_celeba/checkpoint100.pth
+```
+
+*Options*:
+- `--gpu`: enable GPU
+- `--detect_human_face`: enable automatic human face detection using [MTCNN](https://arxiv.org/abs/1604.02878) provided in [facenet-pytorch](https://github.com/timesler/facenet-pytorch)
+- `--render_video`: render 3D animations using [neural_renderer](https://github.com/daniilidis-group/neural_renderer) (GPU is required)
+
+
 ## Training and Testing
 Check the configuration files in `experiments/` and run experiments, eg:
 ```
 python run.py --config experiments/train_celeba.yml --gpu 0 --num_workers 4
 ```
+
 
 ## Citation
 ```
