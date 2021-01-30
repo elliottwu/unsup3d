@@ -24,6 +24,8 @@ for i, row in enumerate(im_list):
     im = cv2.imread(os.path.join(im_dir, fname))
     im_pad = cv2.copyMakeBorder(im, h, h, w, w, cv2.BORDER_REPLICATE)  # allow cropping outside by replicating borders
     im_crop = im_pad[y0+h:y0+h*2, x0+w:x0+w*2]
+    if not (im_crop.shape[0] > 10 and im_crop.shape[1] > 10):
+      continue
     im_crop = cv2.resize(im_crop, (out_im_size,out_im_size))
 
     out_folder = os.path.join(out_dir, split_dict[split])
