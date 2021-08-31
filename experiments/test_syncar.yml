@@ -1,0 +1,35 @@
+## test syncar
+## trainer
+run_test: true
+batch_size: 64
+checkpoint_dir: results/syncar
+checkpoint_name: checkpoint100.pth
+test_result_dir: results/syncar/test_results_checkpoint100
+
+## dataloader
+num_workers: 4
+image_size: 64
+crop: [8, 14, 100, 100]
+load_gt_depth: false
+test_data_dir: data/syncar/test
+
+## model
+model_name: unsup3d_syncar
+min_depth: 0.9
+max_depth: 1.1
+min_amb_light: 0.
+max_amb_light: 1.
+min_diff_light: 0.5
+max_diff_light: 1.
+xyz_rotation_range: 60  # (-r,r) in degrees
+xy_translation_range: 0.1  # (-t,t) in 3D
+z_translation_range: 0  # (-t,t) in 3D
+use_conf_map: false
+lam_perc: 0.01
+lam_flip: 1
+lam_depth_sm: 0.1
+
+## renderer
+rot_center_depth: 1.0
+fov: 10  # in degrees
+tex_cube_size: 2

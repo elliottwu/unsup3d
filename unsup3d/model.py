@@ -20,12 +20,18 @@ class Unsup3D():
         self.min_depth = cfgs.get('min_depth', 0.9)
         self.max_depth = cfgs.get('max_depth', 1.1)
         self.border_depth = cfgs.get('border_depth', (0.7*self.max_depth + 0.3*self.min_depth))
+        self.min_amb_light = cfgs.get('min_amb_light', 0.)
+        self.max_amb_light = cfgs.get('max_amb_light', 1.)
+        self.min_diff_light = cfgs.get('min_diff_light', 0.)
+        self.max_diff_light = cfgs.get('max_diff_light', 1.)
         self.xyz_rotation_range = cfgs.get('xyz_rotation_range', 60)
         self.xy_translation_range = cfgs.get('xy_translation_range', 0.1)
         self.z_translation_range = cfgs.get('z_translation_range', 0.1)
+        self.use_conf_map = cfgs.get('use_conf_map', True)
         self.lam_perc = cfgs.get('lam_perc', 1)
         self.lam_flip = cfgs.get('lam_flip', 0.5)
         self.lam_flip_start_epoch = cfgs.get('lam_flip_start_epoch', 0)
+        self.lam_depth_sm = cfgs.get('lam_depth_sm', 0)
         self.lr = cfgs.get('lr', 1e-4)
         self.load_gt_depth = cfgs.get('load_gt_depth', False)
         self.renderer = Renderer(cfgs)
@@ -35,7 +41,8 @@ class Unsup3D():
         self.netA = networks.EDDeconv(cin=3, cout=3, nf=64, zdim=256)
         self.netL = networks.Encoder(cin=3, cout=4, nf=32)
         self.netV = networks.Encoder(cin=3, cout=6, nf=32)
-        self.netC = networks.ConfNet(cin=3, cout=2, nf=64, zdim=128)
+        if self.use_conf_map:
+            self.netC = networks.ConfNet(cin=3, cout=2, nf=64, zdim=128)
         self.network_names = [k for k in vars(self) if 'net' in k]
         self.make_optimizer = lambda model: torch.optim.Adam(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -47,6 +54,8 @@ class Unsup3D():
 
         ## depth rescaler: -1~1 -> min_deph~max_deph
         self.depth_rescaler = lambda d : (1+d)/2 *self.max_depth + (1-d)/2 *self.min_depth
+        self.amb_light_rescaler = lambda x : (1+x)/2 *self.max_amb_light + (1-x)/2 *self.min_amb_light
+        self.diff_light_rescaler = lambda x : (1+x)/2 *self.max_diff_light + (1-x)/2 *self.min_diff_light
 
     def init_optimizers(self):
         self.optimizer_names = []
@@ -125,6 +134,10 @@ class Unsup3D():
         self.canon_depth = self.canon_depth.tanh()
         self.canon_depth = self.depth_rescaler(self.canon_depth)
 
+        ## optional depth smoothness loss (only used in synthetic car experiments)
+        self.loss_depth_sm = ((self.canon_depth[:,:-1,:] - self.canon_depth[:,1:,:]) /(self.max_depth-self.min_depth)).abs().mean()
+        self.loss_depth_sm += ((self.canon_depth[:,:,:-1] - self.canon_depth[:,:,1:]) /(self.max_depth-self.min_depth)).abs().mean()
+
         ## clamp border depth
         depth_border = torch.zeros(1,h,w-4).to(self.input_im.device)
         depth_border = nn.functional.pad(depth_border, (2,2), mode='constant', value=1)
@@ -136,12 +149,22 @@ class Unsup3D():
         self.canon_albedo = torch.cat([self.canon_albedo, self.canon_albedo.flip(3)], 0)  # flip
 
         ## predict confidence map
-        self.conf_sigma_l1, self.conf_sigma_percl = self.netC(self.input_im)  # Bx2xHxW
+        if self.use_conf_map:
+            conf_sigma_l1, conf_sigma_percl = self.netC(self.input_im)  # Bx2xHxW
+            self.conf_sigma_l1 = conf_sigma_l1[:,:1]
+            self.conf_sigma_l1_flip = conf_sigma_l1[:,1:]
+            self.conf_sigma_percl = conf_sigma_percl[:,:1]
+            self.conf_sigma_percl_flip = conf_sigma_percl[:,1:]
+        else:
+            self.conf_sigma_l1 = None
+            self.conf_sigma_l1_flip = None
+            self.conf_sigma_percl = None
+            self.conf_sigma_percl_flip = None
 
         ## predict lighting
         canon_light = self.netL(self.input_im).repeat(2,1)  # Bx4
-        self.canon_light_a = canon_light[:,:1] /2+0.5  # ambience term
-        self.canon_light_b = canon_light[:,1:2] /2+0.5  # diffuse term
+        self.canon_light_a = self.amb_light_rescaler(canon_light[:,:1])  # ambience term
+        self.canon_light_b = self.diff_light_rescaler(canon_light[:,1:2])  # diffuse term
         canon_light_dxy = canon_light[:,2:]
         self.canon_light_d = torch.cat([canon_light_dxy, torch.ones(b*2,1).to(self.input_im.device)], 1)
         self.canon_light_d = self.canon_light_d / ((self.canon_light_d**2).sum(1, keepdim=True))**0.5  # diffuse light direction
@@ -181,12 +204,12 @@ class Unsup3D():
         self.input_im_symline = (0.5*self.recon_sym_axis) *green + (1-0.5*self.recon_sym_axis) *self.input_im.repeat(2,1,1,1)
 
         ## loss function
-        self.loss_l1_im = self.photometric_loss(self.recon_im[:b], self.input_im, mask=recon_im_mask_both[:b], conf_sigma=self.conf_sigma_l1[:,:1])
-        self.loss_l1_im_flip = self.photometric_loss(self.recon_im[b:], self.input_im, mask=recon_im_mask_both[b:], conf_sigma=self.conf_sigma_l1[:,1:])
-        self.loss_perc_im = self.PerceptualLoss(self.recon_im[:b], self.input_im, mask=recon_im_mask_both[:b], conf_sigma=self.conf_sigma_percl[:,:1])
-        self.loss_perc_im_flip = self.PerceptualLoss(self.recon_im[b:], self.input_im, mask=recon_im_mask_both[b:], conf_sigma=self.conf_sigma_percl[:,1:])
+        self.loss_l1_im = self.photometric_loss(self.recon_im[:b], self.input_im, mask=recon_im_mask_both[:b], conf_sigma=self.conf_sigma_l1)
+        self.loss_l1_im_flip = self.photometric_loss(self.recon_im[b:], self.input_im, mask=recon_im_mask_both[b:], conf_sigma=self.conf_sigma_l1_flip)
+        self.loss_perc_im = self.PerceptualLoss(self.recon_im[:b], self.input_im, mask=recon_im_mask_both[:b], conf_sigma=self.conf_sigma_percl)
+        self.loss_perc_im_flip = self.PerceptualLoss(self.recon_im[b:], self.input_im, mask=recon_im_mask_both[b:], conf_sigma=self.conf_sigma_percl_flip)
         lam_flip = 1 if self.trainer.current_epoch < self.lam_flip_start_epoch else self.lam_flip
-        self.loss_total = self.loss_l1_im + lam_flip*self.loss_l1_im_flip + self.lam_perc*(self.loss_perc_im + lam_flip*self.loss_perc_im_flip)
+        self.loss_total = self.loss_l1_im + lam_flip*self.loss_l1_im_flip + self.lam_perc*(self.loss_perc_im + lam_flip*self.loss_perc_im_flip) + self.lam_depth_sm*self.loss_depth_sm
 
         metrics = {'loss': self.loss_total}
 
@@ -237,10 +260,11 @@ class Unsup3D():
         canon_diffuse_shading = self.canon_diffuse_shading[:b0].detach().cpu()
         canon_normal = self.canon_normal.permute(0,3,1,2)[:b0].detach().cpu() /2+0.5
         recon_normal = self.recon_normal.permute(0,3,1,2)[:b0].detach().cpu() /2+0.5
-        conf_map_l1 = 1/(1+self.conf_sigma_l1[:b0,:1].detach().cpu()+EPS)
-        conf_map_l1_flip = 1/(1+self.conf_sigma_l1[:b0,1:].detach().cpu()+EPS)
-        conf_map_percl = 1/(1+self.conf_sigma_percl[:b0,:1].detach().cpu()+EPS)
-        conf_map_percl_flip = 1/(1+self.conf_sigma_percl[:b0,1:].detach().cpu()+EPS)
+        if self.use_conf_map:
+            conf_map_l1 = 1/(1+self.conf_sigma_l1[:b0].detach().cpu()+EPS)
+            conf_map_l1_flip = 1/(1+self.conf_sigma_l1_flip[:b0].detach().cpu()+EPS)
+            conf_map_percl = 1/(1+self.conf_sigma_percl[:b0].detach().cpu()+EPS)
+            conf_map_percl_flip = 1/(1+self.conf_sigma_percl_flip[:b0].detach().cpu()+EPS)
 
         canon_im_rotate_grid = [torchvision.utils.make_grid(img, nrow=int(math.ceil(b0**0.5))) for img in torch.unbind(canon_im_rotate, 1)]  # [(C,H,W)]*T
         canon_im_rotate_grid = torch.stack(canon_im_rotate_grid, 0).unsqueeze(0)  # (1,T,C,H,W)
@@ -253,6 +277,7 @@ class Unsup3D():
         logger.add_scalar('Loss/loss_l1_im_flip', self.loss_l1_im_flip, total_iter)
         logger.add_scalar('Loss/loss_perc_im', self.loss_perc_im, total_iter)
         logger.add_scalar('Loss/loss_perc_im_flip', self.loss_perc_im_flip, total_iter)
+        logger.add_scalar('Loss/loss_depth_sm', self.loss_depth_sm, total_iter)
 
         logger.add_histogram('Depth/canon_depth_raw_hist', canon_depth_raw_hist, total_iter)
         vlist = ['view_rx', 'view_ry', 'view_rz', 'view_tx', 'view_ty', 'view_tz']
@@ -285,14 +310,15 @@ class Unsup3D():
         logger.add_histogram('Image/canonical_albedo_hist', canon_albedo, total_iter)
         logger.add_histogram('Image/canonical_diffuse_shading_hist', canon_diffuse_shading, total_iter)
 
-        log_grid_image('Conf/conf_map_l1', conf_map_l1)
-        logger.add_histogram('Conf/conf_sigma_l1_hist', self.conf_sigma_l1[:,:1], total_iter)
-        log_grid_image('Conf/conf_map_l1_flip', conf_map_l1_flip)
-        logger.add_histogram('Conf/conf_sigma_l1_flip_hist', self.conf_sigma_l1[:,1:], total_iter)
-        log_grid_image('Conf/conf_map_percl', conf_map_percl)
-        logger.add_histogram('Conf/conf_sigma_percl_hist', self.conf_sigma_percl[:,:1], total_iter)
-        log_grid_image('Conf/conf_map_percl_flip', conf_map_percl_flip)
-        logger.add_histogram('Conf/conf_sigma_percl_flip_hist', self.conf_sigma_percl[:,1:], total_iter)
+        if self.use_conf_map:
+            log_grid_image('Conf/conf_map_l1', conf_map_l1)
+            logger.add_histogram('Conf/conf_sigma_l1_hist', self.conf_sigma_l1, total_iter)
+            log_grid_image('Conf/conf_map_l1_flip', conf_map_l1_flip)
+            logger.add_histogram('Conf/conf_sigma_l1_flip_hist', self.conf_sigma_l1_flip, total_iter)
+            log_grid_image('Conf/conf_map_percl', conf_map_percl)
+            logger.add_histogram('Conf/conf_sigma_percl_hist', self.conf_sigma_percl, total_iter)
+            log_grid_image('Conf/conf_map_percl_flip', conf_map_percl_flip)
+            logger.add_histogram('Conf/conf_sigma_percl_flip_hist', self.conf_sigma_percl_flip, total_iter)
 
         logger.add_video('Image_rotate/recon_rotate', canon_im_rotate_grid, total_iter, fps=4)
         logger.add_video('Image_rotate/canon_normal_rotate', canon_normal_rotate_grid, total_iter, fps=4)
@@ -335,10 +361,11 @@ class Unsup3D():
         canon_diffuse_shading = self.canon_diffuse_shading[:b].detach().cpu().numpy()
         canon_normal = self.canon_normal[:b].permute(0,3,1,2).detach().cpu().numpy() /2+0.5
         recon_normal = self.recon_normal[:b].permute(0,3,1,2).detach().cpu().numpy() /2+0.5
-        conf_map_l1 = 1/(1+self.conf_sigma_l1[:b,:1].detach().cpu().numpy()+EPS)
-        conf_map_l1_flip = 1/(1+self.conf_sigma_l1[:b,1:].detach().cpu().numpy()+EPS)
-        conf_map_percl = 1/(1+self.conf_sigma_percl[:b,:1].detach().cpu().numpy()+EPS)
-        conf_map_percl_flip = 1/(1+self.conf_sigma_percl[:b,1:].detach().cpu().numpy()+EPS)
+        if self.use_conf_map:
+            conf_map_l1 = 1/(1+self.conf_sigma_l1[:b].detach().cpu().numpy()+EPS)
+            conf_map_l1_flip = 1/(1+self.conf_sigma_l1_flip[:b].detach().cpu().numpy()+EPS)
+            conf_map_percl = 1/(1+self.conf_sigma_percl[:b].detach().cpu().numpy()+EPS)
+            conf_map_percl_flip = 1/(1+self.conf_sigma_percl_flip[:b].detach().cpu().numpy()+EPS)
         canon_light = torch.cat([self.canon_light_a, self.canon_light_b, self.canon_light_d], 1)[:b].detach().cpu().numpy()
         view = self.view[:b].detach().cpu().numpy()
 
@@ -359,10 +386,11 @@ class Unsup3D():
         utils.save_images(save_dir, canon_diffuse_shading, suffix='canonical_diffuse_shading', sep_folder=sep_folder)
         utils.save_images(save_dir, canon_normal, suffix='canonical_normal', sep_folder=sep_folder)
         utils.save_images(save_dir, recon_normal, suffix='recon_normal', sep_folder=sep_folder)
-        utils.save_images(save_dir, conf_map_l1, suffix='conf_map_l1', sep_folder=sep_folder)
-        utils.save_images(save_dir, conf_map_l1_flip, suffix='conf_map_l1_flip', sep_folder=sep_folder)
-        utils.save_images(save_dir, conf_map_percl, suffix='conf_map_percl', sep_folder=sep_folder)
-        utils.save_images(save_dir, conf_map_percl_flip, suffix='conf_map_percl_flip', sep_folder=sep_folder)
+        if self.use_conf_map:
+            utils.save_images(save_dir, conf_map_l1, suffix='conf_map_l1', sep_folder=sep_folder)
+            utils.save_images(save_dir, conf_map_l1_flip, suffix='conf_map_l1_flip', sep_folder=sep_folder)
+            utils.save_images(save_dir, conf_map_percl, suffix='conf_map_percl', sep_folder=sep_folder)
+            utils.save_images(save_dir, conf_map_percl_flip, suffix='conf_map_percl_flip', sep_folder=sep_folder)
         utils.save_txt(save_dir, canon_light, suffix='canonical_light', sep_folder=sep_folder)
         utils.save_txt(save_dir, view, suffix='viewpoint', sep_folder=sep_folder)
 
