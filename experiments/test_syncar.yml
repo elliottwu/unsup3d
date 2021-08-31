@@ -2,17 +2,16 @@
 ## trainer
 run_test: true
 batch_size: 64
-# checkpoint_dir: results/syncar
-checkpoint_dir: ../unsup_depth/results/final_car/release_test_db1.08_dl1sm0.1_flip1_pl0.01_noconf_lb0.5-1
+checkpoint_dir: results/syncar
 checkpoint_name: checkpoint100.pth
-# test_result_dir: results/syncar/test_results_checkpoint100
+test_result_dir: results/syncar/test_results_checkpoint100
 
 ## dataloader
 num_workers: 4
 image_size: 64
 crop: [8, 14, 100, 100]
 load_gt_depth: false
-test_data_dir: /tmp/shapenet_cars_6_top/val
+test_data_dir: data/syncar/test
 
 ## model
 model_name: unsup3d_syncar
