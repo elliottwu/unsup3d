@@ -52,6 +52,7 @@ pip install facenet-pytorch
 1. [CelebA](http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) face dataset. Please download the original images (`img_celeba.7z`) from their [website](http://mmlab.ie.cuhk.edu.hk/projects/CelebA.html) and run `celeba_crop.py` in `data/` to crop the images.
 2. Synthetic face dataset generated using [Basel Face Model](https://faces.dmi.unibas.ch/bfm/). This can be downloaded using the script `download_synface.sh` provided in `data/`.
 3. Cat face dataset composed of [Cat Head Dataset](http://academictorrents.com/details/c501571c29d16d7f41d159d699d0e7fb37092cbd) and [Oxford-IIIT Pet Dataset](http://www.robots.ox.ac.uk/~vgg/data/pets/) ([license](https://creativecommons.org/licenses/by-sa/4.0/)). This can be downloaded using the script `download_cat.sh` provided in `data/`.
+4. Synthetic car dataset generated from [ShapeNet](https://shapenet.org/) cars. The images are rendered from with random viewpoints from the top, where the cars are primarily oriented vertically. This can be downloaded using the script `download_syncar.sh` provided in `data/`.
 
 Please remember to cite the corresponding papers if you use these datasets.
 
@@ -70,7 +71,7 @@ python -m demo.demo --input demo/images/human_face --result demo/results/human_f
 
 *Options*:
 - `--gpu`: enable GPU
-- `--detect_human_face`: enable automatic human face detection and cropping using [MTCNN](https://arxiv.org/abs/1604.02878) provided in [facenet-pytorch](https://github.com/timesler/facenet-pytorch). This does not work on cat images. You will need to manually crop the images instead.
+- `--detect_human_face`: enable automatic human face detection and cropping using [MTCNN](https://arxiv.org/abs/1604.02878) provided in [facenet-pytorch](https://github.com/timesler/facenet-pytorch). This only works on human face images. You will need to manually crop the images for other objects.
 - `--render_video`: render 3D animations using [neural_renderer](https://github.com/daniilidis-group/neural_renderer) (GPU is required)
 
 
